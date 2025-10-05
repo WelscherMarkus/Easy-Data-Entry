@@ -1,0 +1,15 @@
+/* Root container styles */
+:root, body, #root {
+  height: 100vh;
+  width: 100vw;
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+/* Utility class for full-size grid containers */
+.full-size-grid {
+  width: 100%;
+  height: 100%;
+}
+
