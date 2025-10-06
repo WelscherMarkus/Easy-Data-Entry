@@ -2,38 +2,25 @@ package main
 
 import (
 	"log"
-	"net/http"
-	"strings"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	"github.com/joho/godotenv"
+	"github.com/spf13/viper"
+	"gorm.io/gorm"
 )
 
-func reactMiddleware() gin.HandlerFunc {
-	return func(context *gin.Context) {
-		switch {
-		case strings.HasPrefix(context.Request.URL.Path, "/api"):
-			context.Next()
-		case strings.HasPrefix(context.Request.URL.Path, "/static"):
-			context.File("./website" + context.Request.URL.Path)
-			context.Abort()
-		case context.Request.URL.Path == "/favicon.ico":
-			http.ServeFile(context.Writer, context.Request, "website/favicon.ico")
-			context.Abort()
-		default:
-			log.Println(context.Request.URL.Path)
-			log.Println(context.Request.Method)
-			log.Println("Serving React App")
-
-			context.File("./website/index.html")
-			context.Abort()
-			return
-		}
-
-	}
-}
+var db *gorm.DB
 
 func main() {
+	var err error
+
+	loadConfig()
+
+	db, err = connectToDatabase()
+	if err != nil {
+		return
+	}
 
 	router := gin.Default()
 
@@ -44,8 +31,9 @@ func main() {
 
 	api.GET("/tables", getTables)
 	api.GET("/tables/:table/schema", getSchema)
+	api.GET("/tables/:table/data", getData)
 
-	err := router.Run(":8080")
+	err = router.Run(":8080")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -53,27 +41,66 @@ func main() {
 }
 
 func getTables(c *gin.Context) {
-	c.JSON(200, []string{"table1", "table2", "table3"})
+	var tables []string
+	err := db.Raw("SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE'").Scan(&tables).Error
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(200, tables)
 }
 
 func getSchema(c *gin.Context) {
-	//table := c.Param("table")
-	schema := map[string]interface{}{
-		"columns": []map[string]string{
-			{"name": "id", "dataType": "number"},
-			{"name": "name", "dataType": "text"},
-			{"name": "created_at", "dataType": "dateString"},
-		},
+	table := c.Param("table")
+
+	type Column struct {
+		Name string `json:"name" gorm:"column:COLUMN_NAME"`
+		Type string `json:"type" gorm:"column:DATA_TYPE"`
 	}
+	type TableSchema struct {
+		Columns []Column `json:"columns"`
+	}
+
+	var columns []Column
+	err := db.Raw("SELECT COLUMN_NAME, DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = ?", table).Scan(&columns).Error
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+
+	for i, col := range columns {
+		switch col.Type {
+		case "int", "bigint", "smallint", "tinyint", "decimal", "numeric", "float", "real", "money", "smallmoney":
+			columns[i].Type = "number"
+		case "char", "varchar", "text", "nchar", "nvarchar", "ntext":
+			columns[i].Type = "text"
+		}
+	}
+
+	schema := TableSchema{Columns: columns}
 	c.JSON(200, schema)
 }
 
 func getData(c *gin.Context) {
-	//table := c.Param("table")
-	data := []map[string]interface{}{
-		{"id": 1, "name": "Alice", "created_at": "2023-01-01"},
-		{"id": 2, "name": "Bob", "created_at": "2023-01-02"},
-		{"id": 3, "name": "Charlie", "created_at": "2023-01-03"},
+	table := c.Param("table")
+
+	var data []map[string]interface{}
+	err := db.Table(table).Limit(100).Find(&data).Error
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
 	}
+
 	c.JSON(200, data)
+}
+
+func loadConfig() {
+	err := godotenv.Load()
+	if err != nil {
+		log.Println("No Environment file found")
+	}
+
+	viper.AutomaticEnv()
+	viper.SetDefault("PORT", "1433")
 }

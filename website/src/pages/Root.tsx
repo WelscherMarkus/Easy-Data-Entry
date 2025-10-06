@@ -48,24 +48,20 @@ const Root: React.FC = () => {
                     setColDefs(columns);
                 })
                 .catch(() => setColDefs([]));
-
-
-
-
         }
 
-        // if (table) {
-        //     fetch(`http://${window.location.hostname}:8080/api/tables/${table}/data`)
-        //         .then(response => response.json())
-        //         .then((data: any[]) => {
-        //             setRowData(data);
-        //         })
-        //         .catch(() => {
-        //             setRowData([]);
-        //         });
-        // } else {
-        //     setRowData([]);
-        // }
+        if (table) {
+            fetch(`http://${window.location.hostname}:8080/api/tables/${table}/data`)
+                .then(response => response.json())
+                .then((data: any[]) => {
+                    setRowData(data);
+                })
+                .catch(() => {
+                    setRowData([]);
+                });
+        } else {
+            setRowData([]);
+        }
 
     }, [table]);
 
