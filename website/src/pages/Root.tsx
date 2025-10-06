@@ -44,9 +44,7 @@ const Root: React.FC = () => {
                     </Select>
                 </FormControl>
             </Grid>
-            <Grid size={10}>
-
-            </Grid>
+            <Grid size={10}/>
 
             <Grid size={12} justifyContent={"center"}>
                 <Box sx={{width: '90%', height: '80vh'}}>

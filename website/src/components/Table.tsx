@@ -6,6 +6,7 @@ import {ColDef} from 'ag-grid-community';
 type TableColumn = {
     name: string;
     dataType: string;
+    keyColumn: boolean;
 };
 
 type TableSchema = {
@@ -42,6 +43,7 @@ export const TableComponent: React.FC<TableProps> = ({ table }) =>{
                     sortable: true,
                     filter: true,
                     resizable: true,
+                    editable: !col.keyColumn
                 }));
                 setColDefs(columns);
             })
@@ -69,13 +71,30 @@ export const TableComponent: React.FC<TableProps> = ({ table }) =>{
         loadColumns(table);
         loadRows(table);
 
+        const interval = setInterval(() => {
+            loadColumns(table);
+            loadRows(table);
+        }, 5000);
+
+        return () => clearInterval(interval);
+
     }, [table]);
+
+    const handleCellValueChanged = (params: any) => {
+        fetch(`http://${window.location.hostname}:8080/api/tables/${table}/data`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(params.data)
+        });
+    };
 
     return (
         <AgGridReact
             rowData={rowData}
             columnDefs={colDefs}
             className="full-size-grid"
+            onCellValueChanged={handleCellValueChanged}
+
         />
     );
 }
