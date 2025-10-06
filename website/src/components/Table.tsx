@@ -2,6 +2,7 @@ import React, {useEffect, useState} from "react";
 
 import {AgGridReact} from "ag-grid-react";
 import {ColDef} from 'ag-grid-community';
+import {useSnackbar} from "notistack";
 
 type TableColumn = {
     name: string;
@@ -14,12 +15,14 @@ type TableSchema = {
 };
 
 type TableProps = {
-    table: string;
+    table?: string;
 };
 
-export const TableComponent: React.FC<TableProps> = ({ table }) =>{
+export const TableComponent: React.FC<TableProps> = ({table}) => {
     const [rowData, setRowData] = useState([{}]);
     const [colDefs, setColDefs] = useState<ColDef[]>([]);
+    const {enqueueSnackbar} = useSnackbar();
+
 
     useEffect(() => {
         if (!table) {
@@ -63,6 +66,8 @@ export const TableComponent: React.FC<TableProps> = ({ table }) =>{
     }
 
     useEffect(() => {
+        setRowData([]);
+
         if (!table) {
             setColDefs([]);
             setRowData([]);
@@ -80,21 +85,34 @@ export const TableComponent: React.FC<TableProps> = ({ table }) =>{
 
     }, [table]);
 
+
     const handleCellValueChanged = (params: any) => {
+        if (!table) return;
+
         fetch(`http://${window.location.hostname}:8080/api/tables/${table}/data`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(params.data)
-        });
-    };
+        })
+            .catch(
+                (error) => {
+                    enqueueSnackbar("Error updating data: " + error.message, {variant: 'error'});
+                    loadRows(table)
+                }
+            )
+            .then(() => {
+                enqueueSnackbar("Data updated successfully", {variant: 'success'});
+                loadRows(table);
+            })
+    }
+
 
     return (
         <AgGridReact
             rowData={rowData}
             columnDefs={colDefs}
             className="full-size-grid"
-            onCellValueChanged={handleCellValueChanged}
+            onCellValueChanged={handleCellValueChanged}/>
 
-        />
     );
 }

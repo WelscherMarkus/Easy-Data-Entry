@@ -7,13 +7,19 @@ import './Root.css';
 import {FormControl, InputLabel, MenuItem, Select, SelectChangeEvent, Stack} from "@mui/material";
 import '../components/Table'
 import {TableComponent} from "../components/Table";
+import { useNavigate, useParams } from "react-router-dom";
 
 
 const Root: React.FC = () => {
     ModuleRegistry.registerModules([AllCommunityModule]);
 
-    const [table, setTable] = React.useState('');
+    const navigate = useNavigate();
+    const { table } = useParams<{ table: string }>();
+
+    // const [table, setTable] = React.useState('');
     const [tables, setTables] = useState<string[]>([]);
+    const [selectedTable, setSelectedTable] = useState<string | undefined>(table);
+
 
     useEffect(() => {
         fetch(`http://${window.location.hostname}:8080/api/tables`)
@@ -22,8 +28,18 @@ const Root: React.FC = () => {
             .catch(() => setTables([]));
     }, []);
 
+    useEffect(() => {
+
+        if (table && tables.includes(table)) {
+            setSelectedTable(table);
+
+        }
+    }, [table]);
+
     const handleChange = (event: SelectChangeEvent) => {
-        setTable(event.target.value as string);
+        const selectedTable = event.target.value as string;
+        navigate(`/editor/${selectedTable}`);
+
     };
 
     return (
@@ -34,7 +50,7 @@ const Root: React.FC = () => {
                     <Select
                         labelId="table-select-label"
                         id="table-select"
-                        value={table}
+                        value={selectedTable}
                         label="Table"
                         onChange={handleChange}
                     >
@@ -47,7 +63,7 @@ const Root: React.FC = () => {
             <Grid size={10}/>
 
             <Grid size={12} justifyContent={"center"}>
-                <Box sx={{width: '90%', height: '80vh'}}>
+                <Box sx={{width: '97%', height: '85vh'}}>
                     <Stack direction="column" spacing={2} sx={{height: '100%'}}>
                         <TableComponent table={table}/>
                     </Stack>
