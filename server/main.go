@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 	"reflect"
+	"strconv"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -47,6 +48,33 @@ func initRouter() *gin.Engine {
 	return router
 }
 
+func getData(c *gin.Context) {
+	table := c.Param("table")
+
+	limitStr := c.DefaultQuery("limit", "100")
+	limit, err := strconv.Atoi(limitStr)
+	if err != nil {
+		c.JSON(400, gin.H{"error": "Invalid limit parameter"})
+		return
+	}
+
+	offsetStr := c.DefaultQuery("offset", "0")
+	offset, err := strconv.Atoi(offsetStr)
+	if err != nil {
+		c.JSON(400, gin.H{"error": "Invalid offset parameter"})
+		return
+	}
+
+	var data []map[string]interface{}
+	err = db.Table(table).Limit(limit).Offset(offset).Find(&data).Error
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(200, data)
+}
+
 func upsertData(c *gin.Context) {
 	table := c.Param("table")
 
@@ -85,17 +113,4 @@ func deleteData(c *gin.Context) {
 	}
 
 	c.JSON(200, gin.H{"status": "deleted"})
-}
-
-func getData(c *gin.Context) {
-	table := c.Param("table")
-
-	var data []map[string]interface{}
-	err := db.Table(table).Limit(100).Find(&data).Error
-	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
-		return
-	}
-
-	c.JSON(200, data)
 }
