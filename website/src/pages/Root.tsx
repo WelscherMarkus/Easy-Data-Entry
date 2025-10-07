@@ -16,7 +16,6 @@ const Root: React.FC = () => {
     const navigate = useNavigate();
     const { table } = useParams<{ table: string }>();
 
-    // const [table, setTable] = React.useState('');
     const [tables, setTables] = useState<string[]>([]);
     const [selectedTable, setSelectedTable] = useState<string | undefined>(table);
 
@@ -34,7 +33,7 @@ const Root: React.FC = () => {
             setSelectedTable(table);
 
         }
-    }, [table]);
+    }, [table, tables]);
 
     const handleChange = (event: SelectChangeEvent) => {
         const selectedTable = event.target.value as string;

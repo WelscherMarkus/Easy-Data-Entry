@@ -139,7 +139,7 @@ func createStructTypeBasedOnSchema(table string) reflect.Type {
 
 		tags := `json:"` + col.DbName + `"`
 		if col.Key {
-			tags += `gorm:"column:` + col.DbName + `;primaryKey"`
+			tags += `gorm:"column:` + col.DbName + `;primaryKey;autoIncrement:false"`
 		} else {
 			tags += `gorm:"column:` + col.DbName + `"`
 		}

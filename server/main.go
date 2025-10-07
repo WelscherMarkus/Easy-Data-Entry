@@ -39,9 +39,10 @@ func initRouter() *gin.Engine {
 
 	api.GET("/tables", getTables)
 	api.GET("/tables/:table/schema", getSchema)
-	api.GET("/tables/:table/data", getData)
 
+	api.GET("/tables/:table/data", getData)
 	api.POST("/tables/:table/data", upsertData)
+	api.DELETE("/tables/:table/data", deleteData)
 
 	return router
 }
@@ -64,6 +65,26 @@ func upsertData(c *gin.Context) {
 	}
 
 	c.JSON(200, gin.H{"status": "success"})
+}
+
+func deleteData(c *gin.Context) {
+	table := c.Param("table")
+
+	genStructType := createStructTypeBasedOnSchema(table).(reflect.Type)
+	data := reflect.New(genStructType).Interface()
+
+	if err := c.BindJSON(data); err != nil {
+		c.JSON(400, gin.H{"error": err.Error()})
+		return
+	}
+
+	result := db.Table(table).Delete(data)
+	if result.Error != nil {
+		c.JSON(500, gin.H{"error": result.Error.Error()})
+		return
+	}
+
+	c.JSON(200, gin.H{"status": "deleted"})
 }
 
 func getData(c *gin.Context) {
