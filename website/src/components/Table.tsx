@@ -118,16 +118,17 @@ export const TableComponent: React.FC<TableProps> = ({table}) => {
                 }
                 return response.json();
             })
+            .then(() => {
+                enqueueSnackbar("Data updated successfully", {variant: 'success'});
+                loadRows(table);
+            })
             .catch(
                 (error) => {
                     enqueueSnackbar("Error updating data: " + error.message, {variant: 'error'});
                     loadRows(table)
                 }
             )
-            .then(() => {
-                enqueueSnackbar("Data updated successfully", {variant: 'success'});
-                loadRows(table);
-            })
+
     }
 
     const deleteRow = (data: any) => {
@@ -144,15 +145,15 @@ export const TableComponent: React.FC<TableProps> = ({table}) => {
                 }
                 return response.json();
             })
+            .then(() => {
+                enqueueSnackbar("Row deleted successfully", {variant: 'success'});
+                loadRows(table);
+            })
             .catch((error) => {
                     enqueueSnackbar("Error deleting row: " + error.message, {variant: 'error'});
                     loadRows(table);
                 }
             )
-            .then(() => {
-                enqueueSnackbar("Row deleted successfully", {variant: 'success'});
-                loadRows(table);
-            })
     }
 
 
