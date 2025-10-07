@@ -32,13 +32,15 @@ export const TableComponent: React.FC<TableProps> = ({table}) => {
             .then(response => response.json())
             .then((data: TableSchema) => {
                 const columns = data.columns.map((col) => ({
-                    headerName: col.name,
+                    headerName: col.keyColumn ? `🔑 ${col.name}` : col.name,
                     field: col.name,
                     sortable: true,
                     filter: true,
                     resizable: true,
                     cellDataType: col.type,
-                    editable: (params: any) => params.data.__isNew === true || !col.keyColumn
+                    editable: (params: any) => params.data.__isNew === true || !col.keyColumn,
+
+
                 }));
                 setColDefs(columns);
             })
