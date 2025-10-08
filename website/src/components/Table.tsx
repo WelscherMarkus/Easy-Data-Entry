@@ -23,8 +23,9 @@ type TableProps = {
 };
 
 export const TableComponent: React.FC<TableProps> = ({table}) => {
-    const [rowData, setRowData] = useState([{}]);
+    const [rowData, setRowData] = useState<Record<string, any>[]>([]);
     const [colDefs, setColDefs] = useState<ColDef[]>([]);
+    const [keyColumns, setKeyColumns] = useState<string[]>([]);
     const {enqueueSnackbar} = useSnackbar();
 
     const loadColumns = (table: string) => {
@@ -39,9 +40,9 @@ export const TableComponent: React.FC<TableProps> = ({table}) => {
                     resizable: true,
                     cellDataType: col.type,
                     editable: (params: any) => params.data.__isNew === true || !col.keyColumn,
-
-
                 }));
+                const keys = data.columns.filter(col => col.keyColumn).map(col => col.name);
+                setKeyColumns(keys);
                 setColDefs(columns);
             })
             .catch(() => {
@@ -95,11 +96,20 @@ export const TableComponent: React.FC<TableProps> = ({table}) => {
             })
             .then(() => {
                 enqueueSnackbar("New row saved successfully", {variant: 'success'});
-                loadRows(table);
+                setRowData(prev => {
+                    const idx = prev.findIndex(row =>
+                        keyColumns.every(key => row[key] === data[key])
+                    );
+
+                    if (idx === -1) return prev;
+
+                    const updated = [...prev];
+                    updated[idx] = { ...updated[idx], __isNew: false };
+                    return updated;
+                });
             })
             .catch((error) => {
                 enqueueSnackbar("Error saving new row: " + error.message, {variant: 'error'});
-                loadRows(table);
             });
     }
 
@@ -108,7 +118,7 @@ export const TableComponent: React.FC<TableProps> = ({table}) => {
         if (params.data.__isNew) return;
 
         fetch(`http://${window.location.hostname}:8080/api/tables/${table}/data`, {
-            method: 'POST',
+            method: 'PUT',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(params.data)
         })
@@ -120,12 +130,10 @@ export const TableComponent: React.FC<TableProps> = ({table}) => {
             })
             .then(() => {
                 enqueueSnackbar("Data updated successfully", {variant: 'success'});
-                loadRows(table);
             })
             .catch(
                 (error) => {
                     enqueueSnackbar("Error updating data: " + error.message, {variant: 'error'});
-                    loadRows(table)
                 }
             )
 
@@ -147,11 +155,13 @@ export const TableComponent: React.FC<TableProps> = ({table}) => {
             })
             .then(() => {
                 enqueueSnackbar("Row deleted successfully", {variant: 'success'});
-                loadRows(table);
+                setRowData(prev => prev.filter(row =>
+                    !keyColumns.every(key => row[key] === data[key])
+                ));
+
             })
             .catch((error) => {
                     enqueueSnackbar("Error deleting row: " + error.message, {variant: 'error'});
-                    loadRows(table);
                 }
             )
     }
@@ -197,6 +207,8 @@ export const TableComponent: React.FC<TableProps> = ({table}) => {
 
     const debug = () => {
         console.log(colDefs);
+        console.log(rowData);
+        console.log(keyColumns);
     }
 
     return (

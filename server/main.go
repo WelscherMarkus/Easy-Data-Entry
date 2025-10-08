@@ -8,10 +8,10 @@ import (
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 )
 
 var db *gorm.DB
+var schemaCache = make(map[string]reflect.Type)
 
 func main() {
 	var err error
@@ -42,7 +42,8 @@ func initRouter() *gin.Engine {
 	api.GET("/tables/:table/schema", getSchema)
 
 	api.GET("/tables/:table/data", getData)
-	api.POST("/tables/:table/data", upsertData)
+	api.POST("/tables/:table/data", createData)
+	api.PUT("/tables/:table/data", updateData)
 	api.DELETE("/tables/:table/data", deleteData)
 
 	return router
@@ -65,8 +66,11 @@ func getData(c *gin.Context) {
 		return
 	}
 
-	var data []map[string]interface{}
-	err = db.Table(table).Limit(limit).Offset(offset).Find(&data).Error
+	genStructType := getStructSchema(table)
+	sliceType := reflect.SliceOf(genStructType)
+	data := reflect.New(sliceType).Interface()
+
+	err = db.Table(table).Limit(limit).Offset(offset).Find(data).Error
 	if err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
@@ -75,18 +79,45 @@ func getData(c *gin.Context) {
 	c.JSON(200, data)
 }
 
-func upsertData(c *gin.Context) {
+func createData(c *gin.Context) {
 	table := c.Param("table")
 
-	genStructType := createStructTypeBasedOnSchema(table).(reflect.Type)
-	data := reflect.New(genStructType).Interface()
+	genStructType := getStructSchema(table)
+	structData := reflect.New(genStructType).Interface()
 
-	if err := c.BindJSON(data); err != nil {
+	if err := c.BindJSON(structData); err != nil {
 		c.JSON(400, gin.H{"error": err.Error()})
 		return
 	}
 
-	result := db.Table(table).Clauses(clause.OnConflict{UpdateAll: true}).Create(data)
+	data := convertGormStructToMap(structData)
+
+	result := db.Table(table).Create(&data)
+	if result.Error != nil {
+		c.JSON(500, gin.H{"error": result.Error.Error()})
+		return
+	}
+
+	c.JSON(200, gin.H{"status": "success"})
+}
+
+func updateData(c *gin.Context) {
+	table := c.Param("table")
+
+	genStructType := getStructSchema(table)
+	structData := reflect.New(genStructType).Interface()
+
+	if err := c.BindJSON(structData); err != nil {
+		c.JSON(400, gin.H{"error": err.Error()})
+		return
+	}
+
+	data := convertGormStructToMap(structData)
+	primaryKeys := retrievePrimaryKeyValues(structData)
+
+	log.Println("Upserting data:", data)
+
+	result := db.Table(table).Where(primaryKeys).Updates(data)
 	if result.Error != nil {
 		c.JSON(500, gin.H{"error": result.Error.Error()})
 		return
@@ -98,15 +129,17 @@ func upsertData(c *gin.Context) {
 func deleteData(c *gin.Context) {
 	table := c.Param("table")
 
-	genStructType := createStructTypeBasedOnSchema(table).(reflect.Type)
-	data := reflect.New(genStructType).Interface()
+	genStructType := getStructSchema(table)
+	structData := reflect.New(genStructType).Interface()
 
-	if err := c.BindJSON(data); err != nil {
+	if err := c.BindJSON(structData); err != nil {
 		c.JSON(400, gin.H{"error": err.Error()})
 		return
 	}
 
-	result := db.Table(table).Delete(data)
+	primaryKeys := retrievePrimaryKeyValues(structData)
+
+	result := db.Table(table).Where(primaryKeys).Delete(nil)
 	if result.Error != nil {
 		c.JSON(500, gin.H{"error": result.Error.Error()})
 		return

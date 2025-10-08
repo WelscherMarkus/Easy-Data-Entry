@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 	"reflect"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"golang.org/x/text/cases"
@@ -117,6 +118,64 @@ func retrieveSchema(table string) ([]SchemaColumn, error) {
 	}
 
 	return columns, nil
+}
+
+func retrievePrimaryKeyValues(data interface{}) map[string]interface{} {
+	resultMap := make(map[string]interface{})
+
+	val := reflect.ValueOf(data).Elem()
+	typ := val.Type()
+
+	for i := 0; i < val.NumField(); i++ {
+		field := typ.Field(i)
+		gormTags := parseGormTag(field.Tag)
+		if _, ok := gormTags["primaryKey"]; ok {
+			columnName := gormTags["column"]
+			resultMap[columnName] = val.Field(i).Interface()
+		}
+
+	}
+
+	return resultMap
+}
+
+func convertGormStructToMap(data interface{}) map[string]interface{} {
+	result := make(map[string]interface{})
+	val := reflect.ValueOf(data).Elem()
+	typ := val.Type()
+
+	for i := 0; i < val.NumField(); i++ {
+		field := typ.Field(i)
+		gormTags := parseGormTag(field.Tag)
+		columnName := gormTags["column"]
+		result[columnName] = val.Field(i).Interface()
+	}
+	return result
+}
+
+func parseGormTag(tag reflect.StructTag) map[string]string {
+	result := make(map[string]string)
+	gormTag := tag.Get("gorm")
+	parts := strings.Split(gormTag, ";")
+	for _, part := range parts {
+		if kv := strings.SplitN(part, ":", 2); len(kv) == 2 {
+			result[kv[0]] = kv[1]
+		} else if part != "" {
+			result[part] = ""
+		}
+	}
+	return result
+}
+
+func getStructSchema(table string) reflect.Type {
+	var genStructType reflect.Type
+	if cachedType, ok := schemaCache[table]; ok {
+		genStructType = cachedType
+	} else {
+		genStructType = createStructTypeBasedOnSchema(table).(reflect.Type)
+		schemaCache[table] = genStructType
+	}
+	return genStructType
 }
 
 func createStructTypeBasedOnSchema(table string) reflect.Type {
