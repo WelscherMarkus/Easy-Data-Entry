@@ -1,13 +1,16 @@
 import React, {useEffect, useState} from "react";
-
 import {AgGridReact} from "ag-grid-react";
 import {ColDef} from 'ag-grid-community';
 import {useSnackbar} from "notistack";
-import {Button, Card, Stack} from "@mui/material";
+import {Button, Card, IconButton, Stack, Typography} from "@mui/material";
 import Box from "@mui/material/Box";
 import CheckIcon from '@mui/icons-material/Check';
 import DeleteIcon from '@mui/icons-material/Delete';
 import config from "../config";
+import Grid from "@mui/material/Grid";
+import RefreshIcon from '@mui/icons-material/Refresh';
+import Snackbar from '@mui/material/Snackbar';
+import CloseIcon from '@mui/icons-material/Close';
 
 type TableColumn = {
     name: string;
@@ -27,7 +30,16 @@ export const TableComponent: React.FC<TableProps> = ({table}) => {
     const [rowData, setRowData] = useState<Record<string, any>[]>([]);
     const [colDefs, setColDefs] = useState<ColDef[]>([]);
     const [keyColumns, setKeyColumns] = useState<string[]>([]);
+
+    const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
+    const [timeSinceLastRefresh, setTimeSinceLastRefresh] = useState<string>('');
+
     const {enqueueSnackbar} = useSnackbar();
+
+    const [snackbarOpen, setSnackbarOpen] = useState(false);
+    const [rowToDelete, setRowToDelete] = useState<any>(null);
+
+    const timerRef = React.useRef<NodeJS.Timeout | null>(null);
 
     const loadColumns = (table: string) => {
         fetch(`${config.API_URL}/tables/${table}/schema`)
@@ -61,6 +73,8 @@ export const TableComponent: React.FC<TableProps> = ({table}) => {
             .catch(() => {
                 setRowData([]);
             });
+        setLastRefresh(new Date());
+
     }
 
 
@@ -81,7 +95,6 @@ export const TableComponent: React.FC<TableProps> = ({table}) => {
         const rowToSave = {...data};
         delete rowToSave.__isNew;
         delete rowToSave.__checkmark;
-
 
 
         fetch(`${config.API_URL}/tables/${table}/data`, {
@@ -105,7 +118,7 @@ export const TableComponent: React.FC<TableProps> = ({table}) => {
                     if (idx === -1) return prev;
 
                     const updated = [...prev];
-                    updated[idx] = { ...updated[idx], __isNew: false };
+                    updated[idx] = {...updated[idx], __isNew: false};
                     return updated;
                 });
             })
@@ -167,6 +180,27 @@ export const TableComponent: React.FC<TableProps> = ({table}) => {
             )
     }
 
+    const handleDeleteClick = (data: any) => {
+        setRowToDelete(data);
+        setSnackbarOpen(true);
+
+        if (timerRef.current) clearTimeout(timerRef.current);
+        timerRef.current = setTimeout(() => {
+            setSnackbarOpen(false);
+            setRowToDelete(null);
+        }, 10000);
+    };
+
+    const handleConfirmDelete = () => {
+        deleteRow(rowToDelete);
+        setSnackbarOpen(false);
+        setRowToDelete(null);
+    };
+
+    const handleCancelDelete = () => {
+        setSnackbarOpen(false);
+        setRowToDelete(null);
+    };
 
     useEffect(() => {
         setRowData([])
@@ -195,7 +229,8 @@ export const TableComponent: React.FC<TableProps> = ({table}) => {
                         </Box>
                     ) : (
                         <Box sx={{display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%'}}>
-                            <DeleteIcon color="info" style={{cursor: 'pointer'}} onClick={() => deleteRow(params.data)}/>
+                            <DeleteIcon color="info" style={{cursor: 'pointer'}}
+                                        onClick={() => handleDeleteClick(params.data)}/>
                         </Box>
                     )
         };
@@ -206,6 +241,34 @@ export const TableComponent: React.FC<TableProps> = ({table}) => {
         });
     }, [colDefs, setColDefs]);
 
+    useEffect(() => {
+        if (!lastRefresh) {
+            setTimeSinceLastRefresh('');
+            return;
+        }
+
+        const interval = setInterval(() => {
+            const now = new Date();
+            const diff = Math.floor((now.getTime() - lastRefresh.getTime()) / 1000);
+            if (diff < 60) {
+                setTimeSinceLastRefresh(`less than 1 minute ago`);
+            } else if (diff < 3600) {
+                setTimeSinceLastRefresh(`${Math.floor(diff / 60)} minutes ago`);
+            } else {
+                setTimeSinceLastRefresh(`${Math.floor(diff / 3600)} hours ago`);
+            }
+        }, 1000);
+
+        return () => clearInterval(interval);
+
+    }, [lastRefresh]);
+
+    const refresh = () => {
+        if (table) {
+            loadRows(table);
+        }
+    }
+
     const debug = () => {
         console.log(colDefs);
         console.log(rowData);
@@ -213,24 +276,71 @@ export const TableComponent: React.FC<TableProps> = ({table}) => {
     }
 
     return (
-        <Card sx={{height: '100%', width: '100%', padding: 2}}>
-            <Stack direction="column" spacing={1} sx={{height: '100%'}}>
-                <Stack direction="row" spacing={2}>
+        <>
+            <Card sx={{height: '100%', width: '100%', padding: 2}}>
+                <Stack direction="column" spacing={2} sx={{height: '100%'}}>
+                    <Grid container spacing={2}>
+                        <Grid size={1}>
+                            <Button sx={{width: '100%'}} variant="outlined" disabled={!table} onClick={addNewRow}>
+                                Add Row
+                            </Button>
+                        </Grid>
+                        <Grid size={1}>
+                            <Button sx={{width: '100%'}} variant="outlined" disabled={!table} onClick={debug}>
+                                Debug
+                            </Button>
+                        </Grid>
+                        <Grid size="grow"/>
 
-                    <Button variant="outlined" disabled={!table} onClick={addNewRow}>
-                        Add Row
-                    </Button>
-                    <Button variant="outlined" disabled={!table} onClick={debug}>
-                        Debug
-                    </Button>
+                        <Grid size={0.5}>
+                            <IconButton sx={{width: '100%'}} disabled={!table} onClick={refresh}>
+                                <RefreshIcon/>
+                            </IconButton>
+                        </Grid>
+                    </Grid>
+                    <AgGridReact
+                        rowData={rowData}
+                        columnDefs={colDefs}
+                        className="full-size-grid"
+                        onCellValueChanged={updateRow}/>
+                    <Grid container>
+                        <Grid size="grow"/>
+                        <Grid size="auto">
+                            <Grid size="auto" sx={{display: 'flex', alignItems: 'center'}}>
+                                <Typography variant="body2" component="div">
+                                    {lastRefresh && (
+                                        <>
+                                            <strong>Last refresh:</strong> {timeSinceLastRefresh}
+                                        </>
+                                    )}
+                                </Typography>
 
+                            </Grid>
+                        </Grid>
+                    </Grid>
                 </Stack>
-                <AgGridReact
-                    rowData={rowData}
-                    columnDefs={colDefs}
-                    className="full-size-grid"
-                    onCellValueChanged={updateRow}/>
-            </Stack>
-        </Card>
+            </Card>
+            <Snackbar
+                open={snackbarOpen}
+                anchorOrigin={{vertical: 'bottom', horizontal: 'center'}}
+                message="Are you sure you want to delete?"
+                sx={{
+                    '& .MuiSnackbarContent-root': {
+                        backgroundColor: '#fff',
+                    },
+                    '& .MuiSnackbarContent-message': {
+                        color: '#333333',
+                    }
+                }}
+                action={<>
+                    <IconButton color="error" size="small" onClick={handleConfirmDelete}>
+                        <DeleteIcon/>
+                    </IconButton>
+                    <IconButton  size="small" onClick={handleCancelDelete}>
+                        <CloseIcon/>
+                    </IconButton>
+                </>}/>
+        </>
+
     );
 }

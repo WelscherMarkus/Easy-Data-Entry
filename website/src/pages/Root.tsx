@@ -63,7 +63,7 @@ const Root: React.FC = () => {
             <Grid size={10}/>
 
             <Grid size={12} justifyContent={"center"}>
-                <Box sx={{width: '97%', height: '85vh'}}>
+                <Box sx={{width: '98%', height: '88vh'}}>
                     <Stack direction="column" spacing={2} sx={{height: '100%'}}>
                         <TableComponent table={table}/>
                     </Stack>
