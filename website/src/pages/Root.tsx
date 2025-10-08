@@ -8,6 +8,7 @@ import {FormControl, InputLabel, MenuItem, Select, SelectChangeEvent, Stack} fro
 import '../components/Table'
 import {TableComponent} from "../components/Table";
 import { useNavigate, useParams } from "react-router-dom";
+import config from '../config';
 
 
 const Root: React.FC = () => {
@@ -21,7 +22,7 @@ const Root: React.FC = () => {
 
 
     useEffect(() => {
-        fetch(`http://${window.location.hostname}:8080/api/tables`)
+        fetch(`${config.API_URL}/tables`)
             .then(response => response.json())
             .then(data => setTables(data))
             .catch(() => setTables([]));

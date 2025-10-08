@@ -7,6 +7,7 @@ import {Button, Card, Stack} from "@mui/material";
 import Box from "@mui/material/Box";
 import CheckIcon from '@mui/icons-material/Check';
 import DeleteIcon from '@mui/icons-material/Delete';
+import config from "../config";
 
 type TableColumn = {
     name: string;
@@ -29,7 +30,7 @@ export const TableComponent: React.FC<TableProps> = ({table}) => {
     const {enqueueSnackbar} = useSnackbar();
 
     const loadColumns = (table: string) => {
-        fetch(`http://${window.location.hostname}:8080/api/tables/${table}/schema`)
+        fetch(`${config.API_URL}/tables/${table}/schema`)
             .then(response => response.json())
             .then((data: TableSchema) => {
                 const columns = data.columns.map((col) => ({
@@ -51,7 +52,7 @@ export const TableComponent: React.FC<TableProps> = ({table}) => {
     }
 
     const loadRows = (table: string) => {
-        fetch(`http://${window.location.hostname}:8080/api/tables/${table}/data`)
+        fetch(`${config.API_URL}/tables/${table}/data`)
             .then(response => response.json())
             .then((data: any[]) => {
                 const rowsWithIsNew = data.map(row => ({...row, __isNew: false}));
@@ -83,7 +84,7 @@ export const TableComponent: React.FC<TableProps> = ({table}) => {
 
 
 
-        fetch(`http://${window.location.hostname}:8080/api/tables/${table}/data`, {
+        fetch(`${config.API_URL}/tables/${table}/data`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(rowToSave)
@@ -117,7 +118,7 @@ export const TableComponent: React.FC<TableProps> = ({table}) => {
         if (!table) return;
         if (params.data.__isNew) return;
 
-        fetch(`http://${window.location.hostname}:8080/api/tables/${table}/data`, {
+        fetch(`${config.API_URL}/tables/${table}/data`, {
             method: 'PUT',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(params.data)
@@ -142,7 +143,7 @@ export const TableComponent: React.FC<TableProps> = ({table}) => {
     const deleteRow = (data: any) => {
         if (!table) return;
 
-        fetch(`http://${window.location.hostname}:8080/api/tables/${table}/data`, {
+        fetch(`${config.API_URL}/tables/${table}/data`, {
             method: 'DELETE',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(data)
