@@ -1,4 +1,7 @@
 import React, {useCallback, useEffect, useRef, useState} from "react";
+import {useSnackbar} from "notistack";
+import config from "../../config";
+// AG Grid Components
 import {AgGridReact} from "ag-grid-react";
 import {ColDef, GridReadyEvent, IDatasource, IGetRowsParams} from 'ag-grid-community';
 import {
@@ -8,14 +11,18 @@ import {
     ValidationModule,
     ClientSideRowModelModule
 } from 'ag-grid-community';
-import {useSnackbar} from "notistack";
-import {Button, Card, IconButton, Stack, Tooltip, Typography} from "@mui/material";
-import Box from "@mui/material/Box";
-import Grid from "@mui/material/Grid";
-import Snackbar from '@mui/material/Snackbar';
-
-import config from "../../config";
-
+// MUI Components
+import {
+    Box,
+    Button,
+    Card,
+    Grid,
+    IconButton,
+    Snackbar,
+    Stack,
+    Tooltip,
+} from "@mui/material";
+// MUI Icons
 import RefreshIcon from '@mui/icons-material/Refresh';
 import CloseIcon from '@mui/icons-material/Close';
 import CheckIcon from '@mui/icons-material/Check';
@@ -25,6 +32,7 @@ type TableColumn = {
     name: string;
     type: string;
     keyColumn: boolean;
+    filterable: boolean;
 };
 
 type TableSchema = {
@@ -59,6 +67,15 @@ export const InfiniteTable: React.FC<TableProps> = ({table}) => {
 
     const timerRef = React.useRef<NodeJS.Timeout | null>(null);
 
+    const defaultColDef = {
+        sortable: true,
+        resizable: true,
+        //floatingFilter: true,
+        // filterParams: {
+        //     filterOptions: ['equals', 'notEqual'],
+        // }
+    }
+
     const loadColumns = (table: string) => {
         fetch(`${config.API_URL}/tables/${table}/schema`)
             .then(response => response.json())
@@ -66,9 +83,7 @@ export const InfiniteTable: React.FC<TableProps> = ({table}) => {
                 let columns: ColDef[] = data.columns.map((col) => ({
                     headerName: col.keyColumn ? `🔑 ${col.name}` : col.name,
                     field: col.name,
-                    sortable: true,
-                    filter: true,
-                    resizable: true,
+                    filter: col.filterable,
                     cellDataType: col.type,
                     editable: (params: any) => params.data.__isNew === true || !col.keyColumn,
                 }));
@@ -94,7 +109,6 @@ export const InfiniteTable: React.FC<TableProps> = ({table}) => {
                 };
 
                 columns = [actionCol, ...columns];
-
                 const keys = data.columns.filter(col => col.keyColumn).map(col => col.name);
                 setKeyColumns(keys);
                 setColDefs(columns);
@@ -228,8 +242,9 @@ export const InfiniteTable: React.FC<TableProps> = ({table}) => {
         const model = gridRef.current?.api.getFilterModel();
         console.log('Filter model changed:', model);
         setFilterModel(model);
-        refresh(); // Refresh grid to fetch filtered data
+        refresh(); 
     }, []);
+
 
     const getRows = (params: IGetRowsParams) => {
         if (!table) {
@@ -239,13 +254,50 @@ export const InfiniteTable: React.FC<TableProps> = ({table}) => {
         const {startRow, endRow} = params;
         let limit = endRow - startRow;
 
-        fetch(`${config.API_URL}/tables/${table}/data?offset=${startRow}&end=${limit}`)
-            .then(response => response.json())
-            .then((data: any[]) => {
-                const combined = [...newRows, ...data];
-                params.successCallback(combined, data.length < limit ? startRow + data.length : undefined);
-            })
+        const filterModel = gridRef.current?.api.getFilterModel() || {};
 
+        const filters = Object.entries(filterModel).map(([field, filter]) => ({
+            field,
+            ...filter
+        }));
+
+        type Result = {
+            data : any[];
+            count: number;
+        }
+
+        if (Object.keys(filterModel).length > 0) {
+            fetch(`${config.API_URL}/tables/${table}/query`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    limit,
+                    offset: startRow,
+                    filters
+                })
+            })
+                .then(response => response.json())
+                .then((data: Result) => {
+                    const combined = [...newRows, ...data.data];
+                    const lastRow = startRow + data.data.length >= data.count ? data.count : undefined;
+                    params.successCallback(combined, lastRow);
+                })
+                .catch(() => {
+                    params.failCallback();
+                } );
+
+
+        } else {
+            fetch(`${config.API_URL}/tables/${table}/data?offset=${startRow}&limit=${limit}`,)
+                .then(response => response.json())
+                .then((data: any[]) => {
+                    const combined = [...newRows, ...data];
+                    params.successCallback(combined, data.length < limit ? startRow + data.length : undefined);
+                })
+                .catch(() => {
+                    params.failCallback();
+                } );
+        }
     }
 
     const onGridReady = useCallback((params: GridReadyEvent) => {
@@ -289,7 +341,7 @@ export const InfiniteTable: React.FC<TableProps> = ({table}) => {
             <Card sx={{height: '100%', width: '100%', padding: 2}}>
                 <Stack direction="column" spacing={2} sx={{height: '100%'}}>
                     <Grid container spacing={2}>
-                        <Grid size={1} sx={{ }}   >
+                        <Grid size={1}>
                             <Stack direction="row" spacing={0}>
                                 <Tooltip title="Clear New Rows">
                                 <IconButton disabled={!table || newRows.length === 0} onClick={resetNewRows}>
@@ -324,6 +376,7 @@ export const InfiniteTable: React.FC<TableProps> = ({table}) => {
                         onCellValueChanged={updateRow}
                         onFilterChanged={onFilterChanged}
                         ref={gridRef}
+                        defaultColDef={defaultColDef}
                     />
 
 

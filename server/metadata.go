@@ -2,12 +2,16 @@ package main
 
 import (
 	"log"
+	"os"
 	"reflect"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 func getTables(c *gin.Context) {
@@ -24,10 +28,16 @@ func getTables(c *gin.Context) {
 func getSchema(c *gin.Context) {
 	table := c.Param("table")
 
+	type DbColumn struct {
+		Name   string `json:"name" gorm:"column:COLUMN_NAME"`
+		DbType string `json:"db_type" gorm:"column:DATA_TYPE"`
+		Key    int    `json:"keyColumn" gorm:"column:IS_PRIMARY_KEY"`
+	}
 	type Column struct {
-		Name string `json:"name" gorm:"column:COLUMN_NAME"`
-		Type string `json:"type" gorm:"column:DATA_TYPE"`
-		Key  int    `json:"keyColumn" gorm:"column:IS_PRIMARY_KEY"`
+		Name   string `json:"name"`
+		Type   string `json:"type"`
+		Key    bool   `json:"key"`
+		Filter bool   `json:"filterable"`
 	}
 	type TableSchema struct {
 		Columns []Column `json:"columns"`
@@ -50,20 +60,35 @@ func getSchema(c *gin.Context) {
 	WHERE c.TABLE_NAME = ?
 	`
 
-	var columns []Column
-	err := db.Raw(query, table).Scan(&columns).Error
+	var dbColumns []DbColumn
+	err := db.Raw(query, table).Scan(&dbColumns).Error
 	if err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
 
-	for i, col := range columns {
-		switch col.Type {
+	var columns []Column
+	for _, dbCol := range dbColumns {
+		var column Column
+		column.Name = dbCol.Name
+		column.Type = dbCol.DbType
+		column.Key = dbCol.Key == 1
+
+		switch dbCol.DbType {
 		case "int", "bigint", "smallint", "tinyint", "decimal", "numeric", "float", "real", "money", "smallmoney":
-			columns[i].Type = "number"
+			column.Type = "number"
 		case "char", "varchar", "text", "nchar", "nvarchar", "ntext":
-			columns[i].Type = "text"
+			column.Type = "text"
 		}
+
+		switch dbCol.DbType {
+		case "int", "varchar":
+			column.Filter = true
+		default:
+			column.Filter = false
+		}
+
+		columns = append(columns, column)
 	}
 
 	schema := TableSchema{Columns: columns}
@@ -96,8 +121,18 @@ func retrieveSchema(table string) ([]SchemaColumn, error) {
 		WHERE c.TABLE_NAME = ?
 	`
 
+	customLogger := logger.New(
+		log.New(os.Stdout, "\r\n", log.LstdFlags),
+		logger.Config{
+			SlowThreshold:             10 * time.Second,
+			LogLevel:                  logger.Warn, // Set your desired level
+			IgnoreRecordNotFoundError: false,
+			Colorful:                  true,
+		},
+	)
+
 	var columns []SchemaColumn
-	err := db.Raw(query, table).Scan(&columns).Error
+	err := db.Session(&gorm.Session{Logger: customLogger}).Raw(query, table).Scan(&columns).Error
 	if err != nil {
 		return nil, err
 	}
@@ -137,6 +172,24 @@ func retrievePrimaryKeyValues(data interface{}) map[string]interface{} {
 	}
 
 	return resultMap
+}
+
+func isColumnNameValid(table string, column string) bool {
+	columns, err := retrieveSchema(table)
+	if err != nil {
+		return false
+	}
+
+	validColumns := make(map[string]bool)
+	for _, col := range columns {
+		validColumns[col.DbName] = true
+	}
+
+	if _, ok := validColumns[column]; ok {
+		return true
+	}
+
+	return false
 }
 
 func convertGormStructToMap(data interface{}) map[string]interface{} {
