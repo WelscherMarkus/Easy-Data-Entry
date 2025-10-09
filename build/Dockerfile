@@ -22,4 +22,5 @@ COPY --from=backend-build /app/main .
 COPY --from=backend-build /app/website ./website
 EXPOSE 8080
 ENV GIN_MODE=release
+ENV NODE_ENV=production
 CMD ["./main"]

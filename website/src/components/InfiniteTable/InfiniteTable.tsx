@@ -1,16 +1,25 @@
-import React, {useEffect, useState} from "react";
+import React, {useCallback, useEffect, useRef, useState} from "react";
 import {AgGridReact} from "ag-grid-react";
-import {ColDef} from 'ag-grid-community';
+import {ColDef, GridReadyEvent, IDatasource, IGetRowsParams} from 'ag-grid-community';
+import {
+    AllCommunityModule,
+    ModuleRegistry,
+    InfiniteRowModelModule,
+    ValidationModule,
+    ClientSideRowModelModule
+} from 'ag-grid-community';
 import {useSnackbar} from "notistack";
-import {Button, Card, IconButton, Stack, Typography} from "@mui/material";
+import {Button, Card, IconButton, Stack, Tooltip, Typography} from "@mui/material";
 import Box from "@mui/material/Box";
+import Grid from "@mui/material/Grid";
+import Snackbar from '@mui/material/Snackbar';
+
+import config from "../../config";
+
+import RefreshIcon from '@mui/icons-material/Refresh';
+import CloseIcon from '@mui/icons-material/Close';
 import CheckIcon from '@mui/icons-material/Check';
 import DeleteIcon from '@mui/icons-material/Delete';
-import config from "../config";
-import Grid from "@mui/material/Grid";
-import RefreshIcon from '@mui/icons-material/Refresh';
-import Snackbar from '@mui/material/Snackbar';
-import CloseIcon from '@mui/icons-material/Close';
 
 type TableColumn = {
     name: string;
@@ -26,13 +35,22 @@ type TableProps = {
     table?: string;
 };
 
-export const TableComponent: React.FC<TableProps> = ({table}) => {
-    const [rowData, setRowData] = useState<Record<string, any>[]>([]);
+export const InfiniteTable: React.FC<TableProps> = ({table}) => {
+    ModuleRegistry.registerModules([AllCommunityModule, InfiniteRowModelModule, ClientSideRowModelModule]);
+
+    if (process.env.NODE_ENV !== 'production') {
+        ModuleRegistry.registerModules([ValidationModule]);
+    }
+
+    const [filterModel, setFilterModel] = useState<any>({});
+
+
+    const gridRef = useRef<AgGridReact<any>>(null);
+
+    const [newRows, setNewRows] = useState<any[]>([]);
+
     const [colDefs, setColDefs] = useState<ColDef[]>([]);
     const [keyColumns, setKeyColumns] = useState<string[]>([]);
-
-    const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
-    const [timeSinceLastRefresh, setTimeSinceLastRefresh] = useState<string>('');
 
     const {enqueueSnackbar} = useSnackbar();
 
@@ -45,7 +63,7 @@ export const TableComponent: React.FC<TableProps> = ({table}) => {
         fetch(`${config.API_URL}/tables/${table}/schema`)
             .then(response => response.json())
             .then((data: TableSchema) => {
-                const columns = data.columns.map((col) => ({
+                let columns: ColDef[] = data.columns.map((col) => ({
                     headerName: col.keyColumn ? `🔑 ${col.name}` : col.name,
                     field: col.name,
                     sortable: true,
@@ -54,6 +72,29 @@ export const TableComponent: React.FC<TableProps> = ({table}) => {
                     cellDataType: col.type,
                     editable: (params: any) => params.data.__isNew === true || !col.keyColumn,
                 }));
+
+                const actionCol: ColDef = {
+                    headerName: '',
+                    field: '__actions',
+                    editable: false,
+                    width: 50,
+                    cellRenderer: (params: any) =>
+                        params.data && params.data.__isNew
+                            ? (
+                                <Box sx={{display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%'}}>
+                                    <CheckIcon color="success" style={{cursor: 'pointer'}}
+                                               onClick={() => saveNewRow(params.data)}/>
+                                </Box>
+                            ) : (
+                                <Box sx={{display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%'}}>
+                                    <DeleteIcon color="info" style={{cursor: 'pointer'}}
+                                                onClick={() => handleDeleteClick(params.data)}/>
+                                </Box>
+                            )
+                };
+
+                columns = [actionCol, ...columns];
+
                 const keys = data.columns.filter(col => col.keyColumn).map(col => col.name);
                 setKeyColumns(keys);
                 setColDefs(columns);
@@ -63,30 +104,23 @@ export const TableComponent: React.FC<TableProps> = ({table}) => {
             });
     }
 
-    const loadRows = (table: string) => {
-        fetch(`${config.API_URL}/tables/${table}/data`)
-            .then(response => response.json())
-            .then((data: any[]) => {
-                const rowsWithIsNew = data.map(row => ({...row, __isNew: false}));
-                setRowData(rowsWithIsNew);
-            })
-            .catch(() => {
-                setRowData([]);
-            });
-        setLastRefresh(new Date());
-
-    }
-
 
     const addNewRow = () => {
-        if (!table) return;
-        const newRow: any = {__isNew: true};
-
+        const emptyRow: Record<string, any> = {__isNew: true};
+        console.log('Creating empty row based on columns:', colDefs);
         colDefs.forEach(col => {
-            newRow[col.field as string] = null;
+            console.log(col);
+            emptyRow[col.field as string] = null;
         });
-        setRowData(prev => [newRow, ...prev]);
-    }
+        console.log('Adding empty row: ', emptyRow);
+        setNewRows(prev => [emptyRow, ...prev]);
+    };
+
+    useEffect(() => {
+        if (newRows.length === 0) return;
+        console.log('New rows changed, refreshing grid', newRows);
+        refresh()
+    }, [newRows]);
 
 
     const saveNewRow = (data: any) => {
@@ -110,17 +144,8 @@ export const TableComponent: React.FC<TableProps> = ({table}) => {
             })
             .then(() => {
                 enqueueSnackbar("New row saved successfully", {variant: 'success'});
-                setRowData(prev => {
-                    const idx = prev.findIndex(row =>
-                        keyColumns.every(key => row[key] === data[key])
-                    );
-
-                    if (idx === -1) return prev;
-
-                    const updated = [...prev];
-                    updated[idx] = {...updated[idx], __isNew: false};
-                    return updated;
-                });
+                setNewRows(prev => prev.filter(row => row !== data));
+                refresh()
             })
             .catch((error) => {
                 enqueueSnackbar("Error saving new row: " + error.message, {variant: 'error'});
@@ -169,10 +194,7 @@ export const TableComponent: React.FC<TableProps> = ({table}) => {
             })
             .then(() => {
                 enqueueSnackbar("Row deleted successfully", {variant: 'success'});
-                setRowData(prev => prev.filter(row =>
-                    !keyColumns.every(key => row[key] === data[key])
-                ));
-
+                refresh()
             })
             .catch((error) => {
                     enqueueSnackbar("Error deleting row: " + error.message, {variant: 'error'});
@@ -202,77 +224,64 @@ export const TableComponent: React.FC<TableProps> = ({table}) => {
         setRowToDelete(null);
     };
 
-    useEffect(() => {
-        setRowData([])
+    const onFilterChanged = useCallback(() => {
+        const model = gridRef.current?.api.getFilterModel();
+        console.log('Filter model changed:', model);
+        setFilterModel(model);
+        refresh(); // Refresh grid to fetch filtered data
+    }, []);
 
+    const getRows = (params: IGetRowsParams) => {
         if (!table) {
-            setColDefs([]);
-            setRowData([]);
             return;
         }
-        loadColumns(table);
-        loadRows(table);
 
-    }, [table, setColDefs, setRowData]);
+        const {startRow, endRow} = params;
+        let limit = endRow - startRow;
 
-    useEffect(() => {
-        const actionCol = {
-            headerName: '',
-            field: '__actions',
-            editable: false,
-            width: 50,
-            cellRenderer: (params: any) =>
-                params.data.__isNew
-                    ? (
-                        <Box sx={{display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%'}}>
-                            <CheckIcon color="success" style={{cursor: 'pointer'}} onClick={() => saveNewRow(params.data)}/>
-                        </Box>
-                    ) : (
-                        <Box sx={{display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%'}}>
-                            <DeleteIcon color="info" style={{cursor: 'pointer'}}
-                                        onClick={() => handleDeleteClick(params.data)}/>
-                        </Box>
-                    )
+        fetch(`${config.API_URL}/tables/${table}/data?offset=${startRow}&end=${limit}`)
+            .then(response => response.json())
+            .then((data: any[]) => {
+                const combined = [...newRows, ...data];
+                params.successCallback(combined, data.length < limit ? startRow + data.length : undefined);
+            })
+
+    }
+
+    const onGridReady = useCallback((params: GridReadyEvent) => {
+        if (!table) return;
+        loadColumns(table)
+        const dataSource: IDatasource = {
+            rowCount: undefined,
+            getRows: (params) => {
+                getRows(params);
+            },
         };
+        params.api.setGridOption("datasource", dataSource);
 
-        setColDefs(prev => {
-            const exists = prev.some(col => col.field === actionCol.field);
-            return exists ? prev : [actionCol, ...prev];
-        });
-    }, [colDefs, setColDefs]);
+    }, []);
 
     useEffect(() => {
-        if (!lastRefresh) {
-            setTimeSinceLastRefresh('');
-            return;
-        }
-
-        const interval = setInterval(() => {
-            const now = new Date();
-            const diff = Math.floor((now.getTime() - lastRefresh.getTime()) / 1000);
-            if (diff < 60) {
-                setTimeSinceLastRefresh(`less than 1 minute ago`);
-            } else if (diff < 3600) {
-                setTimeSinceLastRefresh(`${Math.floor(diff / 60)} minutes ago`);
-            } else {
-                setTimeSinceLastRefresh(`${Math.floor(diff / 3600)} hours ago`);
-            }
-        }, 1000);
-
-        return () => clearInterval(interval);
-
-    }, [lastRefresh]);
+        // Reregister the datasource again when newRows or table changes
+        if (!table || !gridRef.current || !gridRef.current.api) return;
+        const dataSource: IDatasource = {
+            rowCount: undefined,
+            getRows: (params) => getRows(params),
+        };
+        gridRef.current.api.setGridOption("datasource", dataSource);
+    }, [newRows, table]);
 
     const refresh = () => {
-        if (table) {
-            loadRows(table);
-        }
+        gridRef.current?.api.refreshInfiniteCache();
     }
 
     const debug = () => {
-        console.log(colDefs);
-        console.log(rowData);
-        console.log(keyColumns);
+        console.log(newRows)
+        console.log(newRows.length)
+    }
+
+    const resetNewRows = () => {
+        setNewRows([]);
     }
 
     return (
@@ -280,11 +289,20 @@ export const TableComponent: React.FC<TableProps> = ({table}) => {
             <Card sx={{height: '100%', width: '100%', padding: 2}}>
                 <Stack direction="column" spacing={2} sx={{height: '100%'}}>
                     <Grid container spacing={2}>
-                        <Grid size={1}>
-                            <Button sx={{width: '100%'}} variant="outlined" disabled={!table} onClick={addNewRow}>
-                                Add Row
-                            </Button>
+                        <Grid size={1} sx={{ }}   >
+                            <Stack direction="row" spacing={0}>
+                                <Tooltip title="Clear New Rows">
+                                <IconButton disabled={!table || newRows.length === 0} onClick={resetNewRows}>
+                                    <DeleteIcon/>
+                                </IconButton>
+                                </Tooltip>
+                                <Button sx={{width: '100%'}} variant="outlined" disabled={!table} onClick={addNewRow}>
+                                    Add Row
+                                </Button>
+
+                            </Stack>
                         </Grid>
+
                         <Grid size={1}>
                             <Button sx={{width: '100%'}} variant="outlined" disabled={!table} onClick={debug}>
                                 Debug
@@ -299,25 +317,16 @@ export const TableComponent: React.FC<TableProps> = ({table}) => {
                         </Grid>
                     </Grid>
                     <AgGridReact
-                        rowData={rowData}
+                        rowModelType="infinite"
                         columnDefs={colDefs}
                         className="full-size-grid"
-                        onCellValueChanged={updateRow}/>
-                    <Grid container>
-                        <Grid size="grow"/>
-                        <Grid size="auto">
-                            <Grid size="auto" sx={{display: 'flex', alignItems: 'center'}}>
-                                <Typography variant="body2" component="div">
-                                    {lastRefresh && (
-                                        <>
-                                            <strong>Last refresh:</strong> {timeSinceLastRefresh}
-                                        </>
-                                    )}
-                                </Typography>
+                        onGridReady={onGridReady}
+                        onCellValueChanged={updateRow}
+                        onFilterChanged={onFilterChanged}
+                        ref={gridRef}
+                    />
 
-                            </Grid>
-                        </Grid>
-                    </Grid>
+
                 </Stack>
             </Card>
             <Snackbar
@@ -336,7 +345,7 @@ export const TableComponent: React.FC<TableProps> = ({table}) => {
                     <IconButton color="error" size="small" onClick={handleConfirmDelete}>
                         <DeleteIcon/>
                     </IconButton>
-                    <IconButton  size="small" onClick={handleCancelDelete}>
+                    <IconButton size="small" onClick={handleCancelDelete}>
                         <CloseIcon/>
                     </IconButton>
                 </>}/>
