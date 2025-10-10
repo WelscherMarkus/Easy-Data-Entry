@@ -71,7 +71,7 @@ func getSchema(c *gin.Context) {
                        AND k.CONSTRAINT_NAME = tc.CONSTRAINT_NAME
                        AND k.TABLE_SCHEMA = tc.TABLE_SCHEMA
                        AND tc.CONSTRAINT_TYPE IN ('PRIMARY KEY', 'FOREIGN KEY')
-	WHERE c.TABLE_NAME = 'users'
+	WHERE c.TABLE_NAME = ?
 	`
 
 	var dbColumns []DbColumn
