@@ -24,23 +24,12 @@ import {
 } from "@mui/material";
 // MUI Icons
 import RefreshIcon from '@mui/icons-material/Refresh';
-import CloseIcon from '@mui/icons-material/Close';
-import CheckIcon from '@mui/icons-material/Check';
 import DeleteIcon from '@mui/icons-material/Delete';
-import KeyIcon from "@mui/icons-material/Key";
-import VpnKeyIcon from "@mui/icons-material/VpnKey";
+import {LoadColumnDefinitions} from "../LoadColumnDefinitions";
+import {updateRow} from "../UpdateRow";
+import {DeleteRowComponent} from "../DeleteRow";
 
-type TableColumn = {
-    name: string;
-    type: string;
-    key: boolean;
-    filterable: boolean;
-    foreignKeyName: string
-};
 
-type TableSchema = {
-    columns: TableColumn[];
-};
 
 type TableProps = {
     table?: string;
@@ -55,126 +44,30 @@ export const InfiniteTable: React.FC<TableProps> = ({table}) => {
 
     const [filterModel, setFilterModel] = useState<any>({});
 
-
     const gridRef = useRef<AgGridReact<any>>(null);
-
     const [newRows, setNewRows] = useState<any[]>([]);
-
     const [colDefs, setColDefs] = useState<ColDef[]>([]);
-
     const {enqueueSnackbar} = useSnackbar();
 
-    const [snackbarOpen, setSnackbarOpen] = useState(false);
-    const [rowToDelete, setRowToDelete] = useState<any>(null);
-
-    const timerRef = React.useRef<NodeJS.Timeout | null>(null);
 
     const defaultColDef = {
         sortable: true,
         resizable: true,
-        //floatingFilter: true,
-        // filterParams: {
-        //     filterOptions: ['equals', 'notEqual'],
-        // }
+
     }
 
-    type ListOptions = {
-        id: string;
-        name: string;
-    }
+    const [rowToDelete, setRowToDelete] = useState<any>(null);
 
-    const retrieveForeignKeyOptions = async (foreignKeyName: string) => {
-        try {
-            const response = await fetch(`${config.API_URL}/foreign-keys/${foreignKeyName}/data`);
-            if (!response.ok) {
-                throw new Error(`HTTP error! Status: ${response.status}`);
-            }
-            const data: ListOptions[] = await response.json();
-            return data;
-        } catch {
-            enqueueSnackbar(`Error fetching foreign key options for ${foreignKeyName}`, {variant: 'error'});
-            return [];
-        }
-    };
 
-    const loadColumns = async (table: string) => {
-        try {
-            const response = await fetch(`${config.API_URL}/tables/${table}/schema`);
-            const data: TableSchema = await response.json();
-
-            const foreignKeyCols = data.columns.filter(col => col.foreignKeyName);
-
-            const optionsMap: { [key: string]: ListOptions[] } = {};
-            await Promise.all(foreignKeyCols.map(async col => {
-                optionsMap[col.foreignKeyName] = await retrieveForeignKeyOptions(col.foreignKeyName);
-            }));
-
-            let columns = data.columns.map((col) => {
-                let colDef: ColDef = {
-                    headerName: col.name,
-                    field: col.name,
-                    sortable: true,
-                    filter: true,
-                    resizable: true,
-                    cellDataType: col.type,
-                    editable: (params: any) => params.data.__isNew === true || !col.key,
-                    headerComponentParams: {
-                        innerHeaderComponent: () => (
-                            <Box sx={{display: 'flex', alignItems: 'center'}}>
-                                {col.key ? <KeyIcon fontSize="small" sx={{color: '#FFD600', mr: 0.5}}/> : null}
-                                {!col.key && col.foreignKeyName ?
-                                    <VpnKeyIcon color="info" fontSize="small" sx={{mr: 0.5}}/> : null}
-                                <span>{col.name}</span>
-                            </Box>
-                        )
-                    },
-                    context: {foreignKeyName: col.foreignKeyName},
-                };
-
-                if (col.foreignKeyName) {
-                    const listOptions = optionsMap[col.foreignKeyName] || [];
-                    colDef.cellEditor = 'agSelectCellEditor';
-                    colDef.cellEditorParams = {
-                        values: listOptions.map(option => option.id)
-                    };
-                    colDef.valueFormatter = (params) => {
-                        const match = listOptions.find(option => option.id === params.value);
-                        return match ? match.name : params.value;
-                    };
-                }
-
-                return colDef;
+    const loadColumns = (table: string) => {
+        LoadColumnDefinitions(table, saveNewRow, setRowToDelete)
+            .then(([columns, _]) => {
+                setColDefs(columns);
+            })
+            .catch(() => {
+                setColDefs([]);
             });
-
-            const actionCol: ColDef = {
-                headerName: '',
-                field: '__actions',
-                editable: false,
-                width: 50,
-                cellRenderer: (params: any) =>
-                    params.data && params.data.__isNew
-                        ? (
-                            <Box sx={{display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%'}}>
-                                <CheckIcon color="success" style={{cursor: 'pointer'}}
-                                           onClick={() => saveNewRow(params.data)}/>
-                            </Box>
-                        ) : (
-                            <Box sx={{display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%'}}>
-                                <DeleteIcon color="info" style={{cursor: 'pointer'}}
-                                            onClick={() => handleDeleteClick(params.data)}/>
-                            </Box>
-                        )
-            };
-
-            columns = [actionCol, ...columns];
-
-            const keys = data.columns.filter(col => col.key).map(col => col.name);
-            setColDefs(columns);
-        } catch {
-            setColDefs([]);
-        }
-    };
-
+    }
 
     const addNewRow = () => {
         const emptyRow: Record<string, any> = {__isNew: true};
@@ -222,78 +115,6 @@ export const InfiniteTable: React.FC<TableProps> = ({table}) => {
                 enqueueSnackbar("Error saving new row: " + error.message, {variant: 'error'});
             });
     }
-
-    const updateRow = (params: any) => {
-        if (!table) return;
-        if (params.data.__isNew) return;
-
-        fetch(`${config.API_URL}/tables/${table}/data`, {
-            method: 'PUT',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(params.data)
-        })
-            .then(response => {
-                if (!response.ok) {
-                    throw new Error(`HTTP error! Status: ${response.status}`);
-                }
-                return response.json();
-            })
-            .then(() => {
-                enqueueSnackbar("Data updated successfully", {variant: 'success'});
-            })
-            .catch(
-                (error) => {
-                    enqueueSnackbar("Error updating data: " + error.message, {variant: 'error'});
-                }
-            )
-
-    }
-
-    const deleteRow = (data: any) => {
-        if (!table) return;
-
-        fetch(`${config.API_URL}/tables/${table}/data`, {
-            method: 'DELETE',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(data)
-        })
-            .then(response => {
-                if (!response.ok) {
-                    throw new Error(`HTTP error! Status: ${response.status}`);
-                }
-                return response.json();
-            })
-            .then(() => {
-                enqueueSnackbar("Row deleted successfully", {variant: 'success'});
-                refresh()
-            })
-            .catch((error) => {
-                    enqueueSnackbar("Error deleting row: " + error.message, {variant: 'error'});
-                }
-            )
-    }
-
-    const handleDeleteClick = (data: any) => {
-        setRowToDelete(data);
-        setSnackbarOpen(true);
-
-        if (timerRef.current) clearTimeout(timerRef.current);
-        timerRef.current = setTimeout(() => {
-            setSnackbarOpen(false);
-            setRowToDelete(null);
-        }, 10000);
-    };
-
-    const handleConfirmDelete = () => {
-        deleteRow(rowToDelete);
-        setSnackbarOpen(false);
-        setRowToDelete(null);
-    };
-
-    const handleCancelDelete = () => {
-        setSnackbarOpen(false);
-        setRowToDelete(null);
-    };
 
     const onFilterChanged = useCallback(() => {
         const model = gridRef.current?.api.getFilterModel();
@@ -381,6 +202,7 @@ export const InfiniteTable: React.FC<TableProps> = ({table}) => {
     }, [newRows, table]);
 
     const refresh = () => {
+        console.log("Refreshing grid");
         gridRef.current?.api.refreshInfiniteCache();
     }
 
@@ -392,6 +214,12 @@ export const InfiniteTable: React.FC<TableProps> = ({table}) => {
     const resetNewRows = () => {
         setNewRows([]);
     }
+
+    const onCellValueChanged = (params: any) => {
+        if (params.data.__isNew) return;
+        updateRow(table as string, params);
+    }
+
 
     return (
         <>
@@ -430,35 +258,22 @@ export const InfiniteTable: React.FC<TableProps> = ({table}) => {
                         columnDefs={colDefs}
                         className="full-size-grid"
                         onGridReady={onGridReady}
-                        onCellValueChanged={updateRow}
+                        onCellValueChanged={onCellValueChanged}
                         onFilterChanged={onFilterChanged}
                         ref={gridRef}
                         defaultColDef={defaultColDef}
                     />
-
-
                 </Stack>
             </Card>
-            <Snackbar
-                open={snackbarOpen}
-                anchorOrigin={{vertical: 'bottom', horizontal: 'center'}}
-                message="Are you sure you want to delete?"
-                sx={{
-                    '& .MuiSnackbarContent-root': {
-                        backgroundColor: '#fff',
-                    },
-                    '& .MuiSnackbarContent-message': {
-                        color: '#333333',
-                    }
-                }}
-                action={<>
-                    <IconButton color="error" size="small" onClick={handleConfirmDelete}>
-                        <DeleteIcon/>
-                    </IconButton>
-                    <IconButton size="small" onClick={handleCancelDelete}>
-                        <CloseIcon/>
-                    </IconButton>
-                </>}/>
+
+            {rowToDelete && (
+                <DeleteRowComponent
+                    table={table as string}
+                    rowToDelete={rowToDelete}
+                    setRowToDelete={setRowToDelete}
+                    refresh={refresh}
+                />
+              )}
         </>
 
     );
