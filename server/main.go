@@ -12,7 +12,6 @@ import (
 )
 
 var db *gorm.DB
-var schemaCache = make(map[string]reflect.Type)
 
 func main() {
 	var err error
@@ -47,7 +46,6 @@ func initRouter() *gin.Engine {
 
 	tableApi.GET("/data", getData)
 	tableApi.POST("/query", dataQuery)
-
 	tableApi.GET("/odata", odataEndpoint)
 	tableApi.POST("/data", createData)
 	tableApi.PUT("/data", updateData)
@@ -55,7 +53,41 @@ func initRouter() *gin.Engine {
 
 	tableApi.GET("/count", getCount)
 
+	api.GET("/foreign-keys/:foreignKey/data", getForeignKeys)
+
 	return router
+}
+
+func getForeignKeys(c *gin.Context) {
+	foreignKey := c.Param("foreignKey")
+
+	fkMapping := cacheForeignKeys(foreignKey)
+	if reflect.DeepEqual(fkMapping, FkMapping{}) {
+		c.JSON(400, gin.H{"error": "Foreign key not found"})
+		return
+	}
+
+	data := make([]map[string]interface{}, 0)
+
+	result := db.Table(fkMapping.ReferencedTable).
+		Select(fkMapping.ReferencedColumn + " AS id, name").
+		Limit(100).Find(&data)
+	if result.Error != nil {
+		c.JSON(500, gin.H{"error": result.Error.Error()})
+		return
+	}
+
+	duplicateCheck := make(map[string]int)
+	for i, item := range data {
+		name, _ := item["name"].(string)
+		count := duplicateCheck[name]
+		if count > 0 {
+			data[i]["name"] = name + " (" + strconv.Itoa(count) + ")"
+		}
+		duplicateCheck[name] = count + 1
+	}
+
+	c.JSON(200, data)
 }
 
 func generateFilterStatement(field string, filterType string, value interface{}, endValue interface{}) (interface{}, interface{}, interface{}) {

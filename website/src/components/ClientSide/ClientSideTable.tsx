@@ -1,13 +1,15 @@
 import React, {useEffect, useState} from "react";
 import {AgGridReact} from "ag-grid-react";
-import {ColDef} from 'ag-grid-community';
 import {
     AllCommunityModule,
-    ModuleRegistry,
+    ClientSideRowModelModule,
+    ColDef,
     InfiniteRowModelModule,
-    ValidationModule,
-    ClientSideRowModelModule
+    ModuleRegistry,
+    ValidationModule
 } from 'ag-grid-community';
+import {ICellRendererParams, ICellEditorParams, ValueFormatterParams, IHeaderParams} from 'ag-grid-community';
+
 import {useSnackbar} from "notistack";
 import {Button, Card, IconButton, Stack, Typography} from "@mui/material";
 import Box from "@mui/material/Box";
@@ -18,11 +20,14 @@ import Grid from "@mui/material/Grid";
 import RefreshIcon from '@mui/icons-material/Refresh';
 import Snackbar from '@mui/material/Snackbar';
 import CloseIcon from '@mui/icons-material/Close';
+import KeyIcon from '@mui/icons-material/Key';
+import VpnKeyIcon from '@mui/icons-material/VpnKey';
 
 type TableColumn = {
     name: string;
     type: string;
-    keyColumn: boolean;
+    key: boolean;
+    foreignKeyName: string
 };
 
 type TableSchema = {
@@ -54,27 +59,104 @@ export const ClientSideTable: React.FC<TableProps> = ({table}) => {
 
     const timerRef = React.useRef<NodeJS.Timeout | null>(null);
 
-    const loadColumns = (table: string) => {
-        fetch(`${config.API_URL}/tables/${table}/schema`)
-            .then(response => response.json())
-            .then((data: TableSchema) => {
-                const columns = data.columns.map((col) => ({
-                    headerName: col.keyColumn ? `🔑 ${col.name}` : col.name,
+    type ListOptions = {
+        id: string;
+        name: string;
+    }
+
+
+    const retrieveForeignKeyOptions = async (foreignKeyName: string) => {
+        try {
+            const response = await fetch(`${config.API_URL}/foreign-keys/${foreignKeyName}/data`);
+            if (!response.ok) {
+                throw new Error(`HTTP error! Status: ${response.status}`);
+            }
+            const data: ListOptions[] = await response.json();
+            return data;
+        } catch {
+            enqueueSnackbar(`Error fetching foreign key options for ${foreignKeyName}`, {variant: 'error'});
+            return [];
+        }
+    };
+
+    const loadColumns = async (table: string) => {
+        try {
+            const response = await fetch(`${config.API_URL}/tables/${table}/schema`);
+            const data: TableSchema = await response.json();
+
+            const foreignKeyCols = data.columns.filter(col => col.foreignKeyName);
+
+            const optionsMap: { [key: string]: ListOptions[] } = {};
+            await Promise.all(foreignKeyCols.map(async col => {
+                optionsMap[col.foreignKeyName] = await retrieveForeignKeyOptions(col.foreignKeyName);
+            }));
+
+            let columns = data.columns.map((col) => {
+                let colDef: ColDef = {
+                    headerName: col.name,
                     field: col.name,
                     sortable: true,
                     filter: true,
                     resizable: true,
                     cellDataType: col.type,
-                    editable: (params: any) => params.data.__isNew === true || !col.keyColumn,
-                }));
-                const keys = data.columns.filter(col => col.keyColumn).map(col => col.name);
-                setKeyColumns(keys);
-                setColDefs(columns);
-            })
-            .catch(() => {
-                setColDefs([])
+                    editable: (params: any) => params.data.__isNew === true || !col.key,
+                    headerComponentParams: {
+                        innerHeaderComponent: () => (
+                            <Box sx={{display: 'flex', alignItems: 'center'}}>
+                                {col.key ? <KeyIcon fontSize="small" sx={{color: '#FFD600', mr: 0.5}}/> : null}
+                                {!col.key && col.foreignKeyName ?
+                                    <VpnKeyIcon color="info" fontSize="small" sx={{mr: 0.5}}/> : null}
+                                <span>{col.name}</span>
+                            </Box>
+                        )
+                    },
+                    context: {foreignKeyName: col.foreignKeyName},
+                };
+
+                if (col.foreignKeyName) {
+                    const listOptions = optionsMap[col.foreignKeyName] || [];
+                    colDef.cellEditor = 'agSelectCellEditor';
+                    colDef.cellEditorParams = {
+                        values: listOptions.map(option => option.id)
+                    };
+                    colDef.valueFormatter = (params) => {
+                        const match = listOptions.find(option => option.id === params.value);
+                        return match ? match.name : params.value;
+                    };
+                }
+
+                return colDef;
             });
-    }
+
+            const actionCol: ColDef = {
+                headerName: '',
+                field: '__actions',
+                editable: false,
+                width: 50,
+                cellRenderer: (params: any) =>
+                    params.data && params.data.__isNew
+                        ? (
+                            <Box sx={{display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%'}}>
+                                <CheckIcon color="success" style={{cursor: 'pointer'}}
+                                           onClick={() => saveNewRow(params.data)}/>
+                            </Box>
+                        ) : (
+                            <Box sx={{display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%'}}>
+                                <DeleteIcon color="info" style={{cursor: 'pointer'}}
+                                            onClick={() => handleDeleteClick(params.data)}/>
+                            </Box>
+                        )
+            };
+
+            columns = [actionCol, ...columns];
+
+            const keys = data.columns.filter(col => col.key).map(col => col.name);
+            setKeyColumns(keys);
+            setColDefs(columns);
+        } catch {
+            setColDefs([]);
+        }
+    };
 
     const loadRows = (table: string) => {
         fetch(`${config.API_URL}/tables/${table}/data`)
@@ -349,7 +431,7 @@ export const ClientSideTable: React.FC<TableProps> = ({table}) => {
                     <IconButton color="error" size="small" onClick={handleConfirmDelete}>
                         <DeleteIcon/>
                     </IconButton>
-                    <IconButton  size="small" onClick={handleCancelDelete}>
+                    <IconButton size="small" onClick={handleCancelDelete}>
                         <CloseIcon/>
                     </IconButton>
                 </>}/>

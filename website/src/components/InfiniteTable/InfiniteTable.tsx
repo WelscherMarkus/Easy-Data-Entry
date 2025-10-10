@@ -27,12 +27,15 @@ import RefreshIcon from '@mui/icons-material/Refresh';
 import CloseIcon from '@mui/icons-material/Close';
 import CheckIcon from '@mui/icons-material/Check';
 import DeleteIcon from '@mui/icons-material/Delete';
+import KeyIcon from "@mui/icons-material/Key";
+import VpnKeyIcon from "@mui/icons-material/VpnKey";
 
 type TableColumn = {
     name: string;
     type: string;
-    keyColumn: boolean;
+    key: boolean;
     filterable: boolean;
+    foreignKeyName: string
 };
 
 type TableSchema = {
@@ -58,7 +61,6 @@ export const InfiniteTable: React.FC<TableProps> = ({table}) => {
     const [newRows, setNewRows] = useState<any[]>([]);
 
     const [colDefs, setColDefs] = useState<ColDef[]>([]);
-    const [keyColumns, setKeyColumns] = useState<string[]>([]);
 
     const {enqueueSnackbar} = useSnackbar();
 
@@ -76,47 +78,102 @@ export const InfiniteTable: React.FC<TableProps> = ({table}) => {
         // }
     }
 
-    const loadColumns = (table: string) => {
-        fetch(`${config.API_URL}/tables/${table}/schema`)
-            .then(response => response.json())
-            .then((data: TableSchema) => {
-                let columns: ColDef[] = data.columns.map((col) => ({
-                    headerName: col.keyColumn ? `🔑 ${col.name}` : col.name,
-                    field: col.name,
-                    filter: col.filterable,
-                    cellDataType: col.type,
-                    editable: (params: any) => params.data.__isNew === true || !col.keyColumn,
-                }));
+    type ListOptions = {
+        id: string;
+        name: string;
+    }
 
-                const actionCol: ColDef = {
-                    headerName: '',
-                    field: '__actions',
-                    editable: false,
-                    width: 50,
-                    cellRenderer: (params: any) =>
-                        params.data && params.data.__isNew
-                            ? (
-                                <Box sx={{display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%'}}>
-                                    <CheckIcon color="success" style={{cursor: 'pointer'}}
-                                               onClick={() => saveNewRow(params.data)}/>
-                                </Box>
-                            ) : (
-                                <Box sx={{display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%'}}>
-                                    <DeleteIcon color="info" style={{cursor: 'pointer'}}
-                                                onClick={() => handleDeleteClick(params.data)}/>
-                                </Box>
-                            )
+    const retrieveForeignKeyOptions = async (foreignKeyName: string) => {
+        try {
+            const response = await fetch(`${config.API_URL}/foreign-keys/${foreignKeyName}/data`);
+            if (!response.ok) {
+                throw new Error(`HTTP error! Status: ${response.status}`);
+            }
+            const data: ListOptions[] = await response.json();
+            return data;
+        } catch {
+            enqueueSnackbar(`Error fetching foreign key options for ${foreignKeyName}`, {variant: 'error'});
+            return [];
+        }
+    };
+
+    const loadColumns = async (table: string) => {
+        try {
+            const response = await fetch(`${config.API_URL}/tables/${table}/schema`);
+            const data: TableSchema = await response.json();
+
+            const foreignKeyCols = data.columns.filter(col => col.foreignKeyName);
+
+            const optionsMap: { [key: string]: ListOptions[] } = {};
+            await Promise.all(foreignKeyCols.map(async col => {
+                optionsMap[col.foreignKeyName] = await retrieveForeignKeyOptions(col.foreignKeyName);
+            }));
+
+            let columns = data.columns.map((col) => {
+                let colDef: ColDef = {
+                    headerName: col.name,
+                    field: col.name,
+                    sortable: true,
+                    filter: true,
+                    resizable: true,
+                    cellDataType: col.type,
+                    editable: (params: any) => params.data.__isNew === true || !col.key,
+                    headerComponentParams: {
+                        innerHeaderComponent: () => (
+                            <Box sx={{display: 'flex', alignItems: 'center'}}>
+                                {col.key ? <KeyIcon fontSize="small" sx={{color: '#FFD600', mr: 0.5}}/> : null}
+                                {!col.key && col.foreignKeyName ?
+                                    <VpnKeyIcon color="info" fontSize="small" sx={{mr: 0.5}}/> : null}
+                                <span>{col.name}</span>
+                            </Box>
+                        )
+                    },
+                    context: {foreignKeyName: col.foreignKeyName},
                 };
 
-                columns = [actionCol, ...columns];
-                const keys = data.columns.filter(col => col.keyColumn).map(col => col.name);
-                setKeyColumns(keys);
-                setColDefs(columns);
-            })
-            .catch(() => {
-                setColDefs([])
+                if (col.foreignKeyName) {
+                    const listOptions = optionsMap[col.foreignKeyName] || [];
+                    colDef.cellEditor = 'agSelectCellEditor';
+                    colDef.cellEditorParams = {
+                        values: listOptions.map(option => option.id)
+                    };
+                    colDef.valueFormatter = (params) => {
+                        const match = listOptions.find(option => option.id === params.value);
+                        return match ? match.name : params.value;
+                    };
+                }
+
+                return colDef;
             });
-    }
+
+            const actionCol: ColDef = {
+                headerName: '',
+                field: '__actions',
+                editable: false,
+                width: 50,
+                cellRenderer: (params: any) =>
+                    params.data && params.data.__isNew
+                        ? (
+                            <Box sx={{display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%'}}>
+                                <CheckIcon color="success" style={{cursor: 'pointer'}}
+                                           onClick={() => saveNewRow(params.data)}/>
+                            </Box>
+                        ) : (
+                            <Box sx={{display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%'}}>
+                                <DeleteIcon color="info" style={{cursor: 'pointer'}}
+                                            onClick={() => handleDeleteClick(params.data)}/>
+                            </Box>
+                        )
+            };
+
+            columns = [actionCol, ...columns];
+
+            const keys = data.columns.filter(col => col.key).map(col => col.name);
+            setColDefs(columns);
+        } catch {
+            setColDefs([]);
+        }
+    };
 
 
     const addNewRow = () => {
